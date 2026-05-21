@@ -118,7 +118,10 @@ public class Informatica
                             if (!(await checkbox.IsCheckedAsync()))
                                 await checkbox.CheckAsync();
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[WARN] Checkbox skip: {ex.Message}");
+                        }
                     }
 
                     await page.ClickAsync("input[value='csv']");
@@ -214,7 +217,10 @@ public class Informatica
                     Room = location
                 });
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[WARN] Fila ignorada: {ex.Message}");
+            }
         }
 
         return result;

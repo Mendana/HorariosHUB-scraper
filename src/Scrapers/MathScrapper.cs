@@ -103,7 +103,7 @@ public class MathScrapper
                 catch (Exception ex)
                 {
                     Console.WriteLine($"[ERROR DESCARGA] {ex.Message.Split('\n')[0]}");
-                    try { await page.ClickAsync("body"); } catch { }
+                    try { await page.ClickAsync("body"); } catch (Exception ce) { Console.WriteLine($"[WARN] Click body fallido: {ce.Message}"); }
                     await page.WaitForTimeoutAsync(300);
                 }
             }
@@ -215,7 +215,7 @@ public class MathScrapper
             }
             finally
             {
-                try { File.Delete(Path.GetFullPath(file)); } catch { }
+                try { File.Delete(Path.GetFullPath(file)); } catch (Exception fe) { Console.WriteLine($"[WARN] No se pudo borrar {file}: {fe.Message}"); }
             }
         }
 

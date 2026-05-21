@@ -1,32 +1,42 @@
 ﻿using System.Linq;
-using CsvHelper;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Models;
 using Scrapers;
-using System.Globalization;
 
-var info = new Informatica();
-var math = new MathScrapper();
+var builder = WebApplication.CreateBuilder(args);
+var app = builder.Build();
 
-var clasesInfo =
-    await info.DownloadSchedulesAsync();
+string ToCsv(IEnumerable<ScheduleClass> classes)
+{
+    static string Escape(string f) =>
+        f.Contains(',') || f.Contains('"') || f.Contains('\n')
+            ? $"\"{f.Replace("\"", "\"\"")}\""
+            : f;
 
-var clasesMath =
-    await math.DownloadSchedulesAsync();
+    var sb = new System.Text.StringBuilder();
+    sb.AppendLine("Day,Start,End,Subject,Room");
+    foreach (var c in classes)
+        sb.AppendLine($"{Escape(c.Day)},{Escape(c.Start)},{Escape(c.End)},{Escape(c.Subject)},{Escape(c.Room)}");
+    return sb.ToString();
+}
 
-var finalClasses =
-    clasesInfo
+app.MapPost("/scrape", async () =>
+{
+
+    var info = new Informatica();
+    var math = new MathScrapper();
+
+    var clasesInfo = await info.DownloadSchedulesAsync();
+    var clasesMath = await math.DownloadSchedulesAsync();
+
+    var finalClasses = clasesInfo
         .Concat(clasesMath)
         .ToList();
 
-await using var writer =
-    new StreamWriter("horario_final.csv");
+    var csv = ToCsv(finalClasses);
+    return Results.Text(csv, "text/csv");
 
-await using var csv =
-    new CsvWriter(
-        writer,
-        CultureInfo.InvariantCulture);
+});
 
-await csv.WriteRecordsAsync(finalClasses);
-
-Console.WriteLine(
-    $"Clases totales: {finalClasses.Count}");
+app.Run("http://0.0.0.0:3003");
