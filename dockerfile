@@ -11,12 +11,13 @@ RUN dotnet restore src/ConsoleApp/ConsoleApp.csproj
 COPY . .
 RUN dotnet publish src/ConsoleApp/ConsoleApp.csproj -c Release -o ./publish --no-restore
 
-# Instalar Playwright usando el script del publish output
+# Instalar Playwright
 RUN dotnet tool install --global Microsoft.Playwright.CLI
 ENV PATH="$PATH:/root/.dotnet/tools"
 RUN ./publish/playwright.ps1 install chromium || \
     PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright dotnet run --project src/ConsoleApp/ConsoleApp.csproj -- install chromium || \
     playwright install chromium
+
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
