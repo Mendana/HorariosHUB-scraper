@@ -39,4 +39,57 @@ app.MapPost("/scrape", async () =>
 
 });
 
+app.MapPost("/groups", async (HttpRequest request) =>
+{
+    try
+    {
+        using var reader = new StreamReader(request.Body);
+        var body = await reader.ReadToEndAsync();
+
+        // Aceptar UO en el body como texto plano o como query param
+        var uo = body.Trim();
+        if (string.IsNullOrEmpty(uo))
+            uo = request.Query["uo"].ToString().Trim();
+
+        if (string.IsNullOrEmpty(uo))
+            return Results.BadRequest("Se requiere el UO");
+
+        var uoFormatted = uo.ToLower().StartsWith("uo")
+            ? "Uo" + uo[2..]
+            : "Uo" + uo;
+
+        var scraper = new GroupScraper();
+        var result = await scraper.GetGroupsAsync(uoFormatted);
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("Subject,Group");
+
+        foreach (var cls in result.Classes)
+        {
+            string subject, group;
+
+            if (cls.Contains('-'))
+            {
+                var parts = cls.Split('-', 2);
+                subject = parts[0];
+                group = parts[1];
+            }
+            else
+            {
+                var dotIdx = cls.IndexOf('.');
+                subject = cls[..dotIdx];
+                group = cls[(dotIdx + 1)..];
+            }
+
+            sb.AppendLine($"{subject},{group}");
+        }
+
+        return Results.Text(sb.ToString(), "text/csv");
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.Message);
+    }
+});
+
 app.Run("http://0.0.0.0:3003");
