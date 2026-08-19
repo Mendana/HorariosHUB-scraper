@@ -3,7 +3,6 @@ using CsvHelper;
 using Microsoft.Playwright;
 using System.Globalization;
 using System.Text;
-using System.Text.RegularExpressions;
 using ExcelDataReader;
 using Models;
 
@@ -12,7 +11,10 @@ namespace Scrapers;
 public class MathScrapper
 {
     private const string Url =
-        "https://unioviedo-my.sharepoint.com/:f:/g/personal/perezfernandez_uniovi_es/EnRId5nKPg5DncyuhN5-xA4BWcHY0SXA6Y-AjHbFwfyLFQ?e=qwlVj6";
+        "https://unioviedo-my.sharepoint.com/:f:/g/personal/perezfernandez_uniovi_es/IgAQOtBonWm6TakUH-uXy14bAabCjfFxlr1GMrZMWDS-EtY?e=zNt5BE";
+
+    private const int MaxRetries = 3;
+    private const string FileSuffix = "_Listado_de_clases.xls";
 
     public async Task<List<ScheduleClass>> DownloadSchedulesAsync()
     {
@@ -21,35 +23,81 @@ public class MathScrapper
         var downloadDir = Path.GetFullPath("dataM");
         Directory.CreateDirectory(downloadDir);
 
-        var downloadedFiles = new HashSet<string>();
-        // Solo guardamos nombres, no referencias al DOM
-        var fileNamesToDownload = new List<string>();
+        int retryCount = 0;
 
-        using var playwright = await Playwright.CreateAsync();
-        await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
-        var context = await browser.NewContextAsync(new BrowserNewContextOptions { AcceptDownloads = true });
-        var page = await context.NewPageAsync();
-        page.SetDefaultTimeout(60000);
-
-        Console.WriteLine("[WEB] Abriendo SharePoint...");
-        await page.GotoAsync(Url, new PageGotoOptions { WaitUntil = WaitUntilState.Load, Timeout = 120000 });
-        await page.WaitForSelectorAsync("[role='row']");
-
-        // Fase 1: scroll completo recolectando solo nombres
-        await CollectAllFileNamesAsync(page, fileNamesToDownload);
-        Console.WriteLine($"[INFO] Archivos detectados: {fileNamesToDownload.Count}");
-
-        // Fase 2: descargar uno a uno buscando cada fila en el momento justo
-        foreach (var fileName in fileNamesToDownload)
+        while (retryCount < MaxRetries)
         {
-            var filePath = Path.GetFullPath(Path.Combine(downloadDir, fileName.Replace(" ", "_")));
-            if (!downloadedFiles.Add(filePath)) continue;
+            var downloadedFiles = new HashSet<string>();
+            var fileNamesToDownload = new List<string>();
 
-            await DownloadFileByNameAsync(page, fileName, filePath);
+            try
+            {
+                Console.WriteLine($"[REINTENTO] MathScrapper - Intento {retryCount + 1} de {MaxRetries}...");
+
+                using var playwright = await Playwright.CreateAsync();
+                await using var browser = await playwright.Chromium.LaunchAsync(
+                    new BrowserTypeLaunchOptions { Headless = true });
+                var context = await browser.NewContextAsync(
+                    new BrowserNewContextOptions { AcceptDownloads = true });
+                var page = await context.NewPageAsync();
+                page.SetDefaultTimeout(60000);
+
+                Console.WriteLine("[WEB] Abriendo SharePoint...");
+
+                try
+                {
+                    await page.GotoAsync(Url, new PageGotoOptions
+                    {
+                        WaitUntil = WaitUntilState.Load,
+                        Timeout = 120000
+                    });
+                    await page.WaitForSelectorAsync("[role='row']", new PageWaitForSelectorOptions { Timeout = 60000 });
+                    Console.WriteLine("[OK] SharePoint cargado correctamente");
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine($"[ERROR] Timeout al cargar SharePoint: {e.Message}");
+                    throw new Exception("No se pudo conectar a SharePoint");
+                }
+
+                // Fase 1: scroll completo recolectando solo nombres
+                await CollectAllFileNamesAsync(page, fileNamesToDownload);
+                Console.WriteLine($"[INFO] Archivos detectados: {fileNamesToDownload.Count}");
+
+                if (fileNamesToDownload.Count == 0)
+                    throw new Exception("No se detectó ningún archivo '_Listado_de_clases.xls'");
+
+                // Fase 2: descargar uno a uno buscando cada fila en el momento justo
+                foreach (var fileName in fileNamesToDownload)
+                {
+                    var filePath = Path.GetFullPath(Path.Combine(downloadDir, fileName.Replace(" ", "_")));
+                    if (!downloadedFiles.Add(filePath)) continue;
+
+                    await DownloadFileByNameAsync(page, fileName, filePath);
+                }
+
+                await browser.CloseAsync();
+
+                Console.WriteLine($"[OK] MathScrapper completado. Descargados: {downloadedFiles.Count} archivos");
+                return ProcessFiles(downloadedFiles.ToList()); // éxito, salir
+            }
+            catch (Exception ex)
+            {
+                retryCount++;
+                Console.WriteLine($"[ERROR] Error fatal en MathScrapper (intento {retryCount}): {ex.Message}");
+
+                if (retryCount >= MaxRetries)
+                {
+                    Console.WriteLine("[ERROR] Se agotaron los reintentos. MathScrapper falló.");
+                    throw;
+                }
+
+                Console.WriteLine("[ESPERA] Esperando 10 segundos antes de reintentar...");
+                await Task.Delay(10000);
+            }
         }
 
-        Console.WriteLine($"[OK] Descargados: {downloadedFiles.Count} archivos");
-        return ProcessFiles(downloadedFiles.ToList());
+        return new List<ScheduleClass>();
     }
 
     private async Task CollectAllFileNamesAsync(IPage page, List<string> result)
@@ -59,13 +107,11 @@ public class MathScrapper
             ?? await page.QuerySelectorAsync("body");
 
         int noChangeStreak = 0;
-        int lastCount = 0;
+        int lastFileCount = 0;
+        const int maxScrollAttempts = 200;
 
-        for (int i = 0; i < 500; i++)
+        for (int i = 0; i < maxScrollAttempts; i++)
         {
-            await scrollContainer!.EvaluateAsync("el => el.scrollTo(0, el.scrollHeight)");
-            await page.WaitForTimeoutAsync(800);
-
             var rows = await page.QuerySelectorAllAsync("[role='row']");
             foreach (var row in rows)
             {
@@ -73,24 +119,48 @@ public class MathScrapper
                 {
                     var text = await row.InnerTextAsync();
                     var rawName = text.Split('\n')[0].Trim();
-                    var match = Regex.Match(rawName, @"^(\S+_Listado_de_clases\.xls)");
-                    if (match.Success && !result.Contains(match.Groups[1].Value))
-                        result.Add(match.Groups[1].Value);
+
+                    // Fix: antes se usaba un regex con \S+ que fallaba si el
+                    // nombre de archivo contenía espacios, perdiendo archivos
+                    // silenciosamente. endswith es lo que hace la versión Python.
+                    if (rawName.EndsWith(FileSuffix, StringComparison.OrdinalIgnoreCase)
+                        && !result.Contains(rawName))
+                    {
+                        result.Add(rawName);
+                    }
                 }
-                catch { }
+                catch { /* fila puntual ilegible, seguir */ }
             }
 
             Console.WriteLine($"[SCROLL {i}] Filas: {rows.Count} | Archivos: {result.Count}");
 
-            if (rows.Count == lastCount)
+            // Igual que MathScrapper.py: scroll fino (100px) en vez de saltar
+            // al fondo de golpe. Con listas virtualizadas, saltar al fondo
+            // puede hacer que rows.Count no cambie y se corte el scroll
+            // antes de tiempo, perdiendo archivos intermedios.
+            try
+            {
+                await scrollContainer!.EvaluateAsync("el => el.scrollBy(0, 100)");
+                await page.WaitForTimeoutAsync(300);
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"[ADVERTENCIA] Error en scroll: {e.Message}");
+                break;
+            }
+
+            // Se usa el número de ARCHIVOS detectados (no de filas) para decidir
+            // si parar, ya que en listas virtualizadas rows.Count puede
+            // mantenerse constante aunque sigan apareciendo archivos nuevos.
+            if (result.Count == lastFileCount)
             {
                 noChangeStreak++;
-                if (noChangeStreak >= 10) break;
+                if (noChangeStreak >= 20) break;
             }
             else
             {
                 noChangeStreak = 0;
-                lastCount = rows.Count;
+                lastFileCount = result.Count;
             }
         }
     }
@@ -99,12 +169,10 @@ public class MathScrapper
     {
         Console.WriteLine($"[DESCARGA] {fileName}");
 
-        // Reintentos: la fila puede no estar en el DOM aún
         for (int attempt = 0; attempt < 3; attempt++)
         {
             try
             {
-                // Buscar la fila fresca en el DOM actual
                 var rows = await page.QuerySelectorAllAsync("[role='row']");
                 IElementHandle? targetRow = null;
 
@@ -118,11 +186,7 @@ public class MathScrapper
                     }
                 }
 
-                if (targetRow == null)
-                {
-                    // La fila no está visible: hacer scroll hasta encontrarla
-                    targetRow = await ScrollUntilRowVisibleAsync(page, fileName);
-                }
+                targetRow ??= await ScrollUntilRowVisibleAsync(page, fileName);
 
                 if (targetRow == null)
                 {
@@ -136,7 +200,7 @@ public class MathScrapper
                 await targetRow.ClickAsync(new ElementHandleClickOptions { Button = MouseButton.Right });
                 await page.WaitForTimeoutAsync(400);
 
-                var downloadTask = page.WaitForDownloadAsync();
+                var downloadTask = page.WaitForDownloadAsync(new PageWaitForDownloadOptions { Timeout = 30000 });
                 await page.GetByRole(AriaRole.Menuitem, new() { Name = "Descargar", Exact = true }).First.ClickAsync();
 
                 var download = await downloadTask;
@@ -161,7 +225,6 @@ public class MathScrapper
             await page.QuerySelectorAsync("div[class^='list_']")
             ?? await page.QuerySelectorAsync("body");
 
-        // Scroll desde arriba buscando la fila
         await scrollContainer!.EvaluateAsync("el => el.scrollTo(0, 0)");
         await page.WaitForTimeoutAsync(500);
 
@@ -197,12 +260,11 @@ public class MathScrapper
             try
             {
                 var fullPath = Path.GetFullPath(file);
-
                 Console.WriteLine($"[PROCESANDO] {fullPath}");
 
                 if (!File.Exists(fullPath))
                 {
-                    Console.WriteLine($"? NO EXISTE: {fullPath}");
+                    Console.WriteLine($"[ADVERTENCIA] NO EXISTE: {fullPath}");
                     continue;
                 }
 
@@ -210,20 +272,9 @@ public class MathScrapper
                 using var reader = ExcelReaderFactory.CreateReader(stream);
 
                 var dataset = reader.AsDataSet();
-
-                Console.WriteLine($"Sheets: {dataset.Tables.Count}");
-
                 var table = dataset.Tables[0];
 
-                Console.WriteLine($"Rows: {table.Rows.Count}");
-
-                for (int dbg = 0; dbg < Math.Min(10, table.Rows.Count); dbg++)
-                {
-                    var r = table.Rows[dbg];
-                    var cols = string.Join(" | ", Enumerable.Range(0, table.Columns.Count)
-                        .Select(c => $"[{c}]='{r[c]}'"));
-                    Console.WriteLine($"  Fila {dbg}: {cols}");
-                }
+                Console.WriteLine($"Sheets: {dataset.Tables.Count} | Rows: {table.Rows.Count}");
 
                 string code = Path.GetFileNameWithoutExtension(file)
                     .Split('_')[0]
@@ -266,7 +317,10 @@ public class MathScrapper
                             Day = date,
                             Start = parts[0].Trim(),
                             End = parts[1].Trim(),
-                            Subject = $"{NormalizeSubject(code)}.{grupo}",
+                            // Sin normalización de código: la versión Python
+                            // (MathFormatter.py) NO renombra 'ALG' -> 'Alge'.
+                            // Esa normalización solo existe en Informática ('Alg' -> 'Algo').
+                            Subject = $"{code}.{grupo}",
                             Room = aula.Replace("Aula", "").Trim()
                         });
                     }
@@ -282,31 +336,19 @@ public class MathScrapper
             }
             finally
             {
-                try { File.Delete(Path.GetFullPath(file)); } catch (Exception fe) { Console.WriteLine($"[WARN] No se pudo borrar {file}: {fe.Message}"); }
+                try { File.Delete(Path.GetFullPath(file)); }
+                catch (Exception fe) { Console.WriteLine($"[WARN] No se pudo borrar {file}: {fe.Message}"); }
             }
         }
 
         Console.WriteLine($"TOTAL PARSED: {result.Count}");
-
         return result;
-    }
-
-    private string NormalizeSubject(string code)
-    {
-        code = code.Trim().ToUpperInvariant();
-
-        return code switch
-        {
-            "ALG" => "Alge",
-            _ => code
-        };
     }
 
     public async Task ExportCsvAsync(List<ScheduleClass> classes, string output)
     {
         await using var writer = new StreamWriter(output);
         await using var csv = new CsvWriter(writer, CultureInfo.InvariantCulture);
-
         await csv.WriteRecordsAsync(classes);
     }
 }
