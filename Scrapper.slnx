@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ConsoleApp/ConsoleApp.csproj" />
+    <Project Path="src/Models/Models.csproj" />
+    <Project Path="src/Scrapers/Scrapers.csproj" />
+  </Folder>
+</Solution>
