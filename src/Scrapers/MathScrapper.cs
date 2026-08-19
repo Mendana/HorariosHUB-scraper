@@ -11,7 +11,7 @@ namespace Scrapers;
 public class MathScrapper
 {
     private const string Url =
-        "https://unioviedo-my.sharepoint.com/:f:/g/personal/perezfernandez_uniovi_es/EnRId5nKPg5DncyuhN5-xA4BWcHY0SXA6Y-AjHbFwfyLFQ?e=qwlVj6";
+        "https://unioviedo-my.sharepoint.com/:f:/g/personal/perezfernandez_uniovi_es/IgAQOtBonWm6TakUH-uXy14bAabCjfFxlr1GMrZMWDS-EtY?e=zNt5BE";
 
     private const int MaxRetries = 3;
     private const string FileSuffix = "_Listado_de_clases.xls";

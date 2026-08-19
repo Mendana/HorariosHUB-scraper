@@ -34,7 +34,7 @@ public class Informatica
         string outputFolder)
     {
         string url =
-            $"https://gobierno.ingenieriainformatica.uniovi.es/grado/plan/?y=25-26&t={semester}";
+            $"https://gobierno.ingenieriainformatica.uniovi.es/grado/plan/?y=26-27&t={semester}";
 
         string formSelector =
             semester == "s1"
