@@ -1,0 +1,32 @@
+name: Feature request
+description: Proponer una funcionalidad nueva
+title: "[Feature]: "
+labels: ["type:feature"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Área
+      options:
+        - area:scraper
+        - area:api
+        - area:frontend
+        - area:infra
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: ¿Qué quieres conseguir?
+      description: Describe la funcionalidad y el problema que resuelve.
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Contexto adicional
+      description: Alternativas consideradas, mockups, referencias, etc.
+    validations:
+      required: false
