@@ -1,0 +1,41 @@
+name: Bug report
+description: Algo no funciona como debería
+title: "[Bug]: "
+labels: ["type:bug"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Área
+      options:
+        - area:scraper
+        - area:api
+        - area:frontend
+        - area:infra
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: ¿Qué ha pasado?
+      description: Descripción del problema. Incluye mensajes de error si los hay.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Pasos para reproducirlo
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: false
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Comportamiento esperado
+    validations:
+      required: false
