@@ -53,12 +53,12 @@ jobs:
           cache-to: type=gha,mode=max
 
   # Descomentar cuando esté el runner de la VM
-  # deploy:
-  #   needs: build-and-push
-  #   runs-on: self-hosted
-  #   steps:
-  #     - name: Pull and restart
-  #       run: |
-  #         docker login ghcr.io -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
-  #         docker compose pull
-  #         docker compose up -d
+   deploy:
+     needs: build-and-push
+     runs-on: self-hosted
+     steps:
+       - name: Pull and restart
+         run: |
+           docker login ghcr.io -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
+           docker compose -f /home/eii/devops/docker-compose.backend.yml pull scraper
+           docker compose -f /home/eii/devops/docker-compose.backend.yml up -d scraper
