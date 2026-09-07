@@ -3,6 +3,36 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Models;
 using Scrapers;
+using dotenv;
+using dotenv.net;
+
+var envPath = Path.Combine(
+    Directory.GetCurrentDirectory(),
+    "..", "..", ".env"
+);
+
+if (!File.Exists(envPath))
+{
+    envPath = Path.Combine(Directory.GetCurrentDirectory(), ".env");
+    Console.WriteLine($"[DEBUG] Reintentando en: {Path.GetFullPath(envPath)}");
+}
+
+if (File.Exists(envPath))
+{
+    foreach (var line in File.ReadAllLines(envPath))
+    {
+        if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#")) continue;
+        var parts = line.Split('=', 2);
+        if (parts.Length == 2)
+        {
+            Environment.SetEnvironmentVariable(parts[0].Trim(), parts[1].Trim());
+        }
+    }
+}
+else
+{
+    Console.WriteLine($"[ERROR] ❌ .env NO ENCONTRADO");
+}
 
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();

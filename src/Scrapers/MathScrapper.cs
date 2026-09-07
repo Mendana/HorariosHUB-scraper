@@ -10,11 +10,16 @@ namespace Scrapers;
 
 public class MathScrapper
 {
-    private const string Url =
-        "https://unioviedo-my.sharepoint.com/:f:/g/personal/perezfernandez_uniovi_es/IgAQOtBonWm6TakUH-uXy14bAabCjfFxlr1GMrZMWDS-EtY?e=zNt5BE";
+    private readonly string? _url;
 
     private const int MaxRetries = 3;
     private const string FileSuffix = "_Listado_de_clases.xls";
+
+    public MathScrapper()
+    {
+        _url = Environment.GetEnvironmentVariable("SCRAPER_MATEMATICAS_URL");
+    }
+
 
     public async Task<List<ScheduleClass>> DownloadSchedulesAsync()
     {
@@ -46,7 +51,7 @@ public class MathScrapper
 
                 try
                 {
-                    await page.GotoAsync(Url, new PageGotoOptions
+                    await page.GotoAsync(_url, new PageGotoOptions
                     {
                         WaitUntil = WaitUntilState.Load,
                         Timeout = 120000

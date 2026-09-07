@@ -12,6 +12,13 @@ public class Informatica
     private const int MaxRetries = 3;
     private const int ChunkSize = 100;
 
+    private readonly string? _url;
+
+    public Informatica()
+    {
+        _url = Environment.GetEnvironmentVariable("SCRAPER_INFORMATICA_URL");
+    }
+
     public async Task<List<ScheduleClass>> DownloadSchedulesAsync(
         string outputFolder = "dataI")
     {
@@ -34,7 +41,7 @@ public class Informatica
         string outputFolder)
     {
         string url =
-            $"https://gobierno.ingenieriainformatica.uniovi.es/grado/plan/?y=26-27&t={semester}";
+            $"{_url}{semester}";
 
         string formSelector =
             semester == "s1"
