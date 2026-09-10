@@ -3,6 +3,7 @@ using CsvHelper;
 using Microsoft.Playwright;
 using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 using ExcelDataReader;
 using Models;
 
@@ -13,7 +14,15 @@ public class MathScrapper
     private readonly string? _url;
 
     private const int MaxRetries = 3;
-    private const string FileSuffix = "_Listado_de_clases.xls";
+
+    // Solo se aceptan archivos con el formato exacto ASIGNATURA_Listado_de_clases.xls
+    // (p. ej. RNEDO_Listado_de_clases.xls). El código de asignatura debe ser un único
+    // bloque en mayúsculas/dígitos, sin espacios ni guiones bajos. Así se descartan
+    // variantes como "Patron_Listado_de_clases.xls", "RNEDO_PL1_Listado_de_clases.xls"
+    // o "RNEDO_Listado_de_clases (1).xls".
+    private static readonly Regex FileNameRegex = new(
+        @"^[A-ZÑ0-9]+_Listado_de_clases\.xls$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public MathScrapper()
     {
@@ -65,14 +74,12 @@ public class MathScrapper
                     throw new Exception("No se pudo conectar a SharePoint");
                 }
 
-                // Fase 1: scroll completo recolectando solo nombres
                 await CollectAllFileNamesAsync(page, fileNamesToDownload);
                 Console.WriteLine($"[INFO] Archivos detectados: {fileNamesToDownload.Count}");
 
                 if (fileNamesToDownload.Count == 0)
-                    throw new Exception("No se detectó ningún archivo '_Listado_de_clases.xls'");
+                    throw new Exception("No se detectó ningún archivo 'ASIGNATURA_Listado_de_clases.xls'");
 
-                // Fase 2: descargar uno a uno buscando cada fila en el momento justo
                 foreach (var fileName in fileNamesToDownload)
                 {
                     var filePath = Path.GetFullPath(Path.Combine(downloadDir, fileName.Replace(" ", "_")));
@@ -84,7 +91,7 @@ public class MathScrapper
                 await browser.CloseAsync();
 
                 Console.WriteLine($"[OK] MathScrapper completado. Descargados: {downloadedFiles.Count} archivos");
-                return ProcessFiles(downloadedFiles.ToList()); // éxito, salir
+                return ProcessFiles(downloadedFiles.ToList());
             }
             catch (Exception ex)
             {
@@ -125,11 +132,7 @@ public class MathScrapper
                     var text = await row.InnerTextAsync();
                     var rawName = text.Split('\n')[0].Trim();
 
-                    // Fix: antes se usaba un regex con \S+ que fallaba si el
-                    // nombre de archivo contenía espacios, perdiendo archivos
-                    // silenciosamente. endswith es lo que hace la versión Python.
-                    if (rawName.EndsWith(FileSuffix, StringComparison.OrdinalIgnoreCase)
-                        && !result.Contains(rawName))
+                    if (FileNameRegex.IsMatch(rawName) && !result.Contains(rawName))
                     {
                         result.Add(rawName);
                     }
@@ -139,10 +142,6 @@ public class MathScrapper
 
             Console.WriteLine($"[SCROLL {i}] Filas: {rows.Count} | Archivos: {result.Count}");
 
-            // Igual que MathScrapper.py: scroll fino (100px) en vez de saltar
-            // al fondo de golpe. Con listas virtualizadas, saltar al fondo
-            // puede hacer que rows.Count no cambie y se corte el scroll
-            // antes de tiempo, perdiendo archivos intermedios.
             try
             {
                 await scrollContainer!.EvaluateAsync("el => el.scrollBy(0, 100)");
@@ -184,7 +183,7 @@ public class MathScrapper
                 foreach (var row in rows)
                 {
                     var text = await row.InnerTextAsync();
-                    if (text.Split('\n')[0].Trim().StartsWith(fileName.Split('.')[0]))
+                    if (text.Split('\n')[0].Trim() == fileName)
                     {
                         targetRow = row;
                         break;
@@ -241,7 +240,7 @@ public class MathScrapper
                 try
                 {
                     var text = await row.InnerTextAsync();
-                    if (text.Split('\n')[0].Trim().StartsWith(fileName.Split('.')[0]))
+                    if (text.Split('\n')[0].Trim() == fileName)
                         return row;
                 }
                 catch { }
@@ -311,20 +310,19 @@ public class MathScrapper
 
                         var parts = hora.Split('-');
 
-                        var date = DateTime.ParseExact(
-                            fecha.Split(' ')[0],
-                            "dd/MM/yyyy",
-                            CultureInfo.InvariantCulture
-                        ).ToString("dd/MM/yyyy");
+                        var date = ParseFecha(row[5]);
+                        if (date == null)
+                        {
+                            Console.WriteLine($"[FILA {i} ERROR] Fecha no reconocida: '{fecha}'");
+                            continue;
+                        }
 
                         result.Add(new ScheduleClass
                         {
                             Day = date,
                             Start = parts[0].Trim(),
                             End = parts[1].Trim(),
-                            // Sin normalización de código: la versión Python
-                            // (MathFormatter.py) NO renombra 'ALG' -> 'Alge'.
-                            // Esa normalización solo existe en Informática ('Alg' -> 'Algo').
+
                             Subject = $"{code}.{grupo}",
                             Room = aula.Replace("Aula", "").Trim()
                         });
@@ -348,6 +346,29 @@ public class MathScrapper
 
         Console.WriteLine($"TOTAL PARSED: {result.Count}");
         return result;
+    }
+
+    private static string? ParseFecha(object? cell)
+    {
+        switch (cell)
+        {
+            case DateTime dt:
+                return dt.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+
+            case double serial:
+                return DateTime.FromOADate(serial).ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+
+            case string s when DateTime.TryParseExact(
+                s.Trim().Split(' ')[0],
+                new[] { "dd/MM/yyyy", "d/M/yyyy" },
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var parsed):
+                return parsed.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+
+            default:
+                return null;
+        }
     }
 
     public async Task ExportCsvAsync(List<ScheduleClass> classes, string output)
