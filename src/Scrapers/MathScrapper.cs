@@ -16,19 +16,45 @@ public class MathScrapper
     private const int MaxRetries = 3;
 
     // Solo se aceptan archivos con el formato exacto ASIGNATURA_Listado_de_clases.xls
-    // (p. ej. RNEDO_Listado_de_clases.xls). El c�digo de asignatura debe ser un �nico
-    // bloque en may�sculas/d�gitos, sin espacios ni guiones bajos. As� se descartan
-    // variantes como "Patron_Listado_de_clases.xls", "RNEDO_PL1_Listado_de_clases.xls"
+    // (p. ej. RNEDO_Listado_de_clases.xls). El código de asignatura debe ser un único
+    // bloque en mayúsculas/dígitos (o minúsculas, normalizado con IgnoreCase), sin
+    // espacios ni guiones bajos internos. Así se descartan variantes como
+    // "Patron_Listado_de_clases.xls", "RNEDO_PL1_Listado_de_clases.xls"
     // o "RNEDO_Listado_de_clases (1).xls".
+    //
+    // Cambios respecto a la versión anterior:
+    //  - \p{L} en vez de [A-ZÑ] para cubrir cualquier letra acentuada (Á, É, Í, Ó, Ú, Ü, etc.),
+    //    no solo la Ñ.
+    //  - RegexOptions.IgnoreCase para que no importe si el código de asignatura viene
+    //    en minúsculas, mayúsculas o mixto.
+    //  - El nombre se normaliza antes de matchear (ver NormalizeFileName) para eliminar
+    //    espacios no estándar (NBSP, etc.) que SharePoint a veces inyecta.
     private static readonly Regex FileNameRegex = new(
-        @"^[A-Z�0-9]+_Listado_de_clases\.xls$",
-        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+        @"^[\p{L}0-9]+_Listado_de_clases\.xls$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     public MathScrapper()
     {
         _url = Environment.GetEnvironmentVariable("SCRAPER_MATEMATICAS_URL");
     }
 
+    // Normaliza el nombre crudo extraído del DOM: recorta, reemplaza espacios
+    // no estándar (NBSP \u00A0, espacio de ancho cero \u200B, etc.) y colapsa
+    // espacios múltiples. Esto evita falsos negativos del regex por basura
+    // invisible que SharePoint suele insertar en los nombres de fila.
+    private static string NormalizeFileName(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return string.Empty;
+
+        var normalized = raw
+            .Replace('\u00A0', ' ')   // non-breaking space
+            .Replace("\u200B", "")    // zero-width space
+            .Replace("\uFEFF", "");   // BOM / zero-width no-break space
+
+        normalized = Regex.Replace(normalized, @"\s+", " ").Trim();
+        return normalized;
+    }
 
     public async Task<List<ScheduleClass>> DownloadSchedulesAsync()
     {
@@ -78,7 +104,7 @@ public class MathScrapper
                 Console.WriteLine($"[INFO] Archivos detectados: {fileNamesToDownload.Count}");
 
                 if (fileNamesToDownload.Count == 0)
-                    throw new Exception("No se detect� ning�n archivo 'ASIGNATURA_Listado_de_clases.xls'");
+                    throw new Exception("No se detectó ningún archivo 'ASIGNATURA_Listado_de_clases.xls'");
 
                 foreach (var fileName in fileNamesToDownload)
                 {
@@ -100,7 +126,7 @@ public class MathScrapper
 
                 if (retryCount >= MaxRetries)
                 {
-                    Console.WriteLine("[ERROR] Se agotaron los reintentos. MathScrapper fall�.");
+                    Console.WriteLine("[ERROR] Se agotaron los reintentos. MathScrapper falló.");
                     throw;
                 }
 
@@ -130,11 +156,21 @@ public class MathScrapper
                 try
                 {
                     var text = await row.InnerTextAsync();
-                    var rawName = text.Split('\n')[0].Trim();
+                    var rawName = NormalizeFileName(text.Split('\n')[0]);
 
-                    if (FileNameRegex.IsMatch(rawName) && !result.Contains(rawName))
+                    if (string.IsNullOrEmpty(rawName))
+                        continue;
+
+                    if (FileNameRegex.IsMatch(rawName))
                     {
-                        result.Add(rawName);
+                        if (!result.Contains(rawName))
+                            result.Add(rawName);
+                    }
+                    else
+                    {
+                        // Log de diagnóstico: útil para ver qué nombres se están
+                        // descartando y por qué, sin tener que adivinar.
+                        Console.WriteLine($"[DEBUG] No matchea patrón Listado_de_clases: '{rawName}'");
                     }
                 }
                 catch { /* fila puntual ilegible, seguir */ }
@@ -153,7 +189,7 @@ public class MathScrapper
                 break;
             }
 
-            // Se usa el n�mero de ARCHIVOS detectados (no de filas) para decidir
+            // Se usa el número de ARCHIVOS detectados (no de filas) para decidir
             // si parar, ya que en listas virtualizadas rows.Count puede
             // mantenerse constante aunque sigan apareciendo archivos nuevos.
             if (result.Count == lastFileCount)
@@ -183,7 +219,7 @@ public class MathScrapper
                 foreach (var row in rows)
                 {
                     var text = await row.InnerTextAsync();
-                    if (text.Split('\n')[0].Trim() == fileName)
+                    if (NormalizeFileName(text.Split('\n')[0]) == fileName)
                     {
                         targetRow = row;
                         break;
@@ -212,7 +248,7 @@ public class MathScrapper
 
                 await page.ClickAsync("body");
                 await page.WaitForTimeoutAsync(400);
-                return; // �xito
+                return; // éxito
             }
             catch (Exception ex)
             {
@@ -240,7 +276,7 @@ public class MathScrapper
                 try
                 {
                     var text = await row.InnerTextAsync();
-                    if (text.Split('\n')[0].Trim() == fileName)
+                    if (NormalizeFileName(text.Split('\n')[0]) == fileName)
                         return row;
                 }
                 catch { }
